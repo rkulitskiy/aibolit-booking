@@ -36,9 +36,9 @@ bot.command('showdoctors', async (ctx) => {
         let message = '<b>Список докторов:</b>\n';
         doctors.forEach((doc, index) => {
             const statusEmoji = doc.isEnabled ? '🟢' : '🔴';
-            message += `${statusEmoji} ${doc.fullName} - ${doc.position}. (<b>ID:</b> <code>${doc._id}</code>)\n`;
+            message += `${doc.position} - ${statusEmoji} ${doc.fullName}\n`;
         });
-        ctx.replyWithHTML(message); // Используем метод replyWithHTML для отправки сообщения с HTML форматированием
+        ctx.replyWithHTML(message);
     } catch (error) {
         console.error('Ошибка при получении списка докторов:', error);
         ctx.reply('Произошла ошибка при получении списка докторов.');
