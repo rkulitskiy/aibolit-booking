@@ -36,7 +36,7 @@ bot.command('showdoctors', async (ctx) => {
         let message = '<b>Список докторов:</b>\n';
         doctors.forEach((doc, index) => {
             const statusEmoji = doc.isEnabled ? '🟢' : '🔴';
-            message += `${doc.position} - ${statusEmoji} ${doc.fullName}\n`;
+            message += `${statusEmoji} ${doc.fullName} - ${doc.position}\n`;
         });
         ctx.replyWithHTML(message);
     } catch (error) {

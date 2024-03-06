@@ -100,7 +100,6 @@ class Database {
             // Публикация события после успешного обновления слотов
             if(updateResult.modifiedCount > 0 || updateResult.upsertedCount > 0) {
                 eventBus.emit('timeSlotsUpdated', { doctorId, newSlots });
-                console.log(`Time slots updated for doctor with ID ${doctorId}`);
             }
         } catch (error) {
             console.error(`Error updating time slots for doctor with ID ${doctorId}:`, error);
