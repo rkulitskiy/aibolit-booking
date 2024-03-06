@@ -1,5 +1,7 @@
 const { MongoClient, ObjectId } = require('mongodb');
 const eventBus = require('./eventBus');
+const axios = require('axios');
+const moment = require("moment/moment");
 
 class Database {
     constructor() {
@@ -42,7 +44,6 @@ class Database {
     }
 
     async getAllDoctors() {
-
         try {
             const doctorsCollection = this.db.collection('doctors');
             return await doctorsCollection.find({}).toArray();
@@ -115,6 +116,37 @@ class Database {
             throw error; // Выбрасываем ошибку для обработки на более высоком уровне
         }
     }
+
+    async findDoctorByLastName(lastName) {
+        return await this.db.collection('doctors').findOne({ "fullName": { $regex: lastName, $options: 'i' } });
+    }
+
+    async getActualSlotsForDoctor(doctor) {
+        const dateStart = moment().format('YYYY-MM-DD');
+        const dateEnd = moment().add(14, 'days').format('YYYY-MM-DD');
+
+        const response = await axios.get(`https://my2.aibolit.md/api/v2/my/providers/timetables`, {
+            params: {
+                assignmentId: doctor.assignmentId,
+                dateStart,
+                dateEnd,
+                physicianId: doctor.physicianId
+            }
+        });
+
+        return response.data[0].timetable;
+    }
+
+    async getDoctorById(doctorId) {
+        try {
+            const id = typeof doctorId === 'string' ? new ObjectId(doctorId) : doctorId;
+            return await this.db.collection('doctors').findOne({_id: id});
+        } catch (error) {
+            console.error(`Error fetching doctor with ID ${doctorId}:`, error);
+            throw error; // Перебрасываем ошибку для обработки в вызывающем коде
+        }
+    }
+
 
 }
 

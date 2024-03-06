@@ -24,22 +24,22 @@ async function updateDoctorsTimeSlots() {
                 const newSlots = response.data[0].timetable;
                 newSlots.sort((a, b) => new Date(a.start) - new Date(b.start));
 
+                // Получаем текущие слоты из базы данных
                 const currentSlots = await database.getDoctorTimeSlots(doctor._id) || [];
 
-                if (currentSlots.length > 0) {
-                    const slotsToNotify = newSlots.filter(newSlot => !currentSlots.some(currentSlot => currentSlot.id === newSlot.id));
+                // Обновляем все слоты в базе данных
+                await database.updateDoctorTimeSlots(doctor._id, newSlots);
 
-                    if (slotsToNotify.length > 0) {
-                        for (const slot of slotsToNotify) {
-                            notifyUsersAboutNewSlot(doctor, slot);
-                        }
-                        await database.updateDoctorTimeSlots(doctor._id, newSlots);
-                        console.log(`Time slots updated with new slots for doctor ${doctor.fullName}`);
-                    }
-                } else {
-                    await database.updateDoctorTimeSlots(doctor._id, newSlots);
-                    console.log(`Time slots saved for new doctor ${doctor.fullName}`);
+                // Определяем новые слоты для уведомлений, сравнивая со слотами до обновления
+                const slotsToNotify = newSlots.filter(newSlot => !currentSlots.some(currentSlot => newSlot.id === currentSlot.id));
+
+                // Уведомляем пользователей о новых слотах, которые не были в базе до обновления
+                if (slotsToNotify.length > 0) {
+                    slotsToNotify.forEach(slot => notifyUsersAboutNewSlot(doctor, slot));
+                    console.log(`Notified about new slots for doctor ${doctor.fullName}`);
                 }
+
+                console.log(`Time slots updated for doctor ${doctor.fullName}`);
             }
         } catch (error) {
             console.error(`Error updating time slots for doctor ${doctor.fullName}:`, error);

@@ -1,6 +1,7 @@
-const { Telegraf, session } = require('telegraf');
+const { Telegraf, session, Markup } = require('telegraf');
 const database = require('./database');
 const eventBus = require('./eventBus');
+const moment = require('moment');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
@@ -44,10 +45,101 @@ bot.command('showdoctors', async (ctx) => {
     }
 });
 
+bot.command('toggledoctor', async (ctx) => {
+    try {
+        const doctors = await database.getAllDoctors();
+        if (doctors.length === 0) {
+            return ctx.reply('В базе данных нет докторов.');
+        }
 
-bot.command('toggledoctor', (ctx) => {
-    ctx.reply('Введите id доктора:');
-    ctx.session.stage = 'awaiting_doctor_id';
+        const buttons = doctors.map(doctor =>
+            Markup.button.callback(`${doctor.isEnabled ? '🟢' : '🔴'} ${doctor.fullName}`, `toggle_${doctor._id.toString()}`)
+        );
+
+        const inlineKeyboard = Markup.inlineKeyboard(buttons, {columns: 1});
+        await ctx.reply('Выберите доктора для изменения статуса:', inlineKeyboard);
+    } catch (error) {
+        console.error('Ошибка при получении списка докторов:', error);
+        ctx.reply('Произошла ошибка при попытке получить список докторов.');
+    }
+});
+
+bot.action(/^toggle_(.+)/, async (ctx) => {
+    const doctorId = ctx.match[1]; // Получаем ID доктора из callback_data кнопки
+    try {
+        const updatedDoctor = await database.toggleDoctorEnabledState(doctorId);
+        // Сначала ответим на callback_query, чтобы у пользователя не висел "часик" в интерфейсе Telegram
+        await ctx.answerCbQuery(`Статус доктора '${updatedDoctor.fullName}' изменен на ${updatedDoctor.isEnabled ? 'включен' : 'выключен'}.`);
+
+        // Затем попытаемся отредактировать сообщение
+        try {
+            await ctx.editMessageText(`Доктор ${updatedDoctor.fullName} был успешно ${updatedDoctor.isEnabled ? 'включен' : 'выключен'}.`);
+        } catch (error) {
+            if (error.response && error.response.error_code === 400 && error.response.description.startsWith("Bad Request: message is not modified")) {
+                console.log("Игнорируем ошибку неизмененного сообщения");
+            } else {
+                // Если ошибка не связана с неизмененным сообщением, выбрасываем её дальше
+                throw error;
+            }
+        }
+    } catch (error) {
+        console.error('Ошибка при обновлении статуса доктора:', error);
+    }
+});
+
+bot.command('slots', async (ctx) => {
+    try {
+        const doctors = await database.getAllDoctors();
+        if (doctors.length === 0) {
+            return ctx.reply('В базе данных нет докторов.');
+        }
+
+        // Создаем кнопки для каждого доктора
+        const buttons = doctors.map((doctor) =>
+            Markup.button.callback(`${doctor.fullName}`, `slots_${doctor._id}`)
+        );
+
+        const inlineKeyboard = Markup.inlineKeyboard(buttons, { columns: 1 });
+        await ctx.reply('Выберите доктора:', inlineKeyboard);
+    } catch (error) {
+        console.error('Ошибка при получении списка докторов:', error);
+        ctx.reply('Произошла ошибка при попытке получить список докторов.');
+    }
+});
+
+bot.action(/^slots_(.+)$/, async (ctx) => {
+    const doctorId = ctx.match[1];
+    try {
+        const doctor = await database.getDoctorById(doctorId);
+        const slots = await database.getActualSlotsForDoctor(doctor);
+
+        if (slots && slots.length > 0) {
+            let message = `Доступные слоты для доктора <b>${doctor.fullName}</b> на ближайшие 2 недели:\n`;
+            // Группировка слотов по датам
+            const slotsByDate = slots.reduce((acc, slot) => {
+                const date = moment(slot.start).format('DD.MM.YYYY');
+                if (!acc[date]) {
+                    acc[date] = [];
+                }
+                acc[date].push(slot);
+                return acc;
+            }, {});
+
+            Object.entries(slotsByDate).forEach(([date, slots]) => {
+                message += `\n<b>📅 ${date}:</b>\n`;
+                slots.forEach(slot => {
+                    message += ` 🕒 ${moment(slot.start).format('HH:mm')}\n`;
+                });
+            });
+
+            await ctx.editMessageText(message, { parse_mode: 'HTML' });
+        } else {
+            await ctx.answerCbQuery('Для данного доктора нет доступных слотов.');
+        }
+    } catch (error) {
+        console.error('Ошибка при извлечении слотов:', error);
+        await ctx.answerCbQuery('Произошла ошибка при извлечении доступных слотов.');
+    }
 });
 
 bot.on('text', async (ctx) => {
@@ -84,17 +176,6 @@ bot.on('text', async (ctx) => {
             } catch (error) {
                 console.error('Ошибка при добавлении доктора:', error);
                 ctx.reply('Произошла ошибка при добавлении доктора.');
-            }
-            ctx.session.stage = undefined; // Очищаем этап диалога
-            break;
-        case 'awaiting_doctor_id':
-            const doctorId = ctx.message.text;
-            try {
-                const updatedDoctor = await database.toggleDoctorEnabledState(doctorId);
-                ctx.reply(`Доктор ${updatedDoctor.fullName} теперь ${updatedDoctor.isEnabled ? 'включен' : 'выключен'}.`);
-            } catch (error) {
-                console.error('Ошибка при обновлении статуса доктора:', error);
-                ctx.reply('Произошла ошибка при обновлении статуса доктора.');
             }
             ctx.session.stage = undefined; // Очищаем этап диалога
             break;
