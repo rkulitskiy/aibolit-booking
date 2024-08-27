@@ -8,6 +8,14 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 // Включаем поддержку сессии
 bot.use(session());
 
+// Инициализация сессии, если она не определена
+bot.use((ctx, next) => {
+    if (!ctx.session) {
+        ctx.session = {}; // Инициализируем сессию, если она не определена
+    }
+    return next();
+});
+
 bot.start(async (ctx) => {
     const user = {
         id: ctx.from.id,
@@ -26,8 +34,13 @@ bot.start(async (ctx) => {
 });
 
 bot.command('adddoctor', (ctx) => {
+    if (!ctx.session) {
+        ctx.session = {}; // Инициализируем сессию, если она не определена
+    }
+    console.log(ctx.session);
     ctx.reply('Введите assignmentId доктора:');
     ctx.session.stage = 'awaiting_assignmentId';
+    console.log(ctx.session);
 });
 
 bot.command('showdoctors', async (ctx) => {
@@ -143,6 +156,10 @@ bot.action(/^slots_(.+)$/, async (ctx) => {
 });
 
 bot.on('text', async (ctx) => {
+    if (!ctx.session) {
+        ctx.session = {}; // Гарантированно инициализируем сессию, если её нет
+    }
+
     if (!ctx.session.stage) {
         return; // Если стадия не установлена, игнорируем текстовые сообщения
     }
@@ -194,6 +211,5 @@ eventBus.on('notifyUser', (data) => {
         console.error(`Error sending notification to user ${data.userId}:`, error);
     });
 });
-
 
 module.exports = { launchBot };
