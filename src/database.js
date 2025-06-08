@@ -1,7 +1,7 @@
 const { MongoClient, ObjectId } = require('mongodb');
 const eventBus = require('./eventBus');
 const axios = require('axios');
-const moment = require("moment/moment");
+const moment = require('moment');
 
 class Database {
     constructor() {
@@ -18,6 +18,17 @@ class Database {
         }
     }
 
+    async close() {
+        try {
+            if (this.client) {
+                await this.client.close();
+                this.db = null;
+            }
+        } catch (error) {
+            console.error("Error closing MongoDB connection", error);
+        }
+    }
+
     async addUser(user) {
         const usersCollection = this.db.collection('users');
         await usersCollection.insertOne(user);
@@ -25,6 +36,8 @@ class Database {
 
     async addDoctor(doctor) {
         const doctorsCollection = this.db.collection('doctors');
+        doctor.createdAt = new Date();
+        doctor.provider = doctor.provider || 'aibolit';
         await doctorsCollection.insertOne(doctor);
     }
 
@@ -49,7 +62,7 @@ class Database {
             return await doctorsCollection.find({}).toArray();
         } catch (error) {
             console.error('Ошибка при получении списка докторов:', error);
-            throw error; // Перебрасываем ошибку для обработки на более высоком уровне
+            throw error;
         }
     }
 
@@ -59,13 +72,32 @@ class Database {
             return await doctorsCollection.find({ isEnabled: true  }).toArray();
         } catch (error) {
             console.error('Ошибка при получении списка докторов:', error);
-            throw error; // Перебрасываем ошибку для обработки на более высоком уровне
+            throw error;
+        }
+    }
+
+    async getEnabledDoctorsByProvider(provider) {
+        try {
+            const doctorsCollection = this.db.collection('doctors');
+            return await doctorsCollection.find({ isEnabled: true, provider: provider }).toArray();
+        } catch (error) {
+            console.error(`Ошибка при получении списка докторов провайдера ${provider}:`, error);
+            throw error;
+        }
+    }
+
+    async getDoctorsByProvider(provider) {
+        try {
+            const doctorsCollection = this.db.collection('doctors');
+            return await doctorsCollection.find({ provider: provider }).toArray();
+        } catch (error) {
+            console.error(`Ошибка при получении докторов провайдера ${provider}:`, error);
+            throw error;
         }
     }
 
     async toggleDoctorEnabledState(doctorId) {
         try {
-            // Исправление здесь: используем 'new' для создания экземпляра ObjectId
             const docId = new ObjectId(doctorId);
             const doctor = await this.db.collection('doctors').findOne({ _id: docId });
             if (!doctor) {
@@ -83,7 +115,6 @@ class Database {
     }
 
     async getDoctorTimeSlots(doctorId) {
-        // Преобразуем doctorId к типу ObjectId, если он передан в виде строки
         const id = typeof doctorId === 'string' ? new ObjectId(doctorId) : doctorId;
         const record = await this.db.collection('timeSlots').findOne({ doctorId: id });
         return record ? record.slots : [];
@@ -97,7 +128,6 @@ class Database {
                 { upsert: true }
             );
 
-            // Публикация события после успешного обновления слотов
             if(updateResult.modifiedCount > 0 || updateResult.upsertedCount > 0) {
                 eventBus.emit('timeSlotsUpdated', { doctorId, newSlots });
             }
@@ -112,7 +142,7 @@ class Database {
             return await this.db.collection('users').find({}).toArray();
         } catch (error) {
             console.error('Error getting all users from database:', error);
-            throw error; // Выбрасываем ошибку для обработки на более высоком уровне
+            throw error;
         }
     }
 
@@ -142,10 +172,33 @@ class Database {
             return await this.db.collection('doctors').findOne({_id: id});
         } catch (error) {
             console.error(`Error fetching doctor with ID ${doctorId}:`, error);
-            throw error; // Перебрасываем ошибку для обработки в вызывающем коде
+            throw error;
         }
     }
 
+    async findDoctorById(doctorId) {
+        try {
+            const id = typeof doctorId === 'string' ? new ObjectId(doctorId) : doctorId;
+            return await this.db.collection('doctors').findOne({_id: id});
+        } catch (error) {
+            console.error(`Error finding doctor with ID ${doctorId}:`, error);
+            throw error;
+        }
+    }
+
+    async updateDoctorStatus(doctorId, isEnabled) {
+        try {
+            const id = typeof doctorId === 'string' ? new ObjectId(doctorId) : doctorId;
+            const result = await this.db.collection('doctors').updateOne(
+                { _id: id },
+                { $set: { isEnabled: isEnabled } }
+            );
+            return result;
+        } catch (error) {
+            console.error(`Error updating doctor status with ID ${doctorId}:`, error);
+            throw error;
+        }
+    }
 
 }
 

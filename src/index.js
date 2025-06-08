@@ -1,18 +1,22 @@
 require('dotenv').config();
 const database = require('./database');
-const { launchBot } = require('./bot'); // Импортируем функцию запуска бота
+const { launchBot } = require('./bot');
 const scheduler = require('./scheduler');
 
 async function startApp() {
     try {
-        await database.connect(); // Подключаемся к MongoDB
-        console.log('Connected to MongoDB successfully');
+        console.log('🔌 Подключение к MongoDB...');
+        await database.connect();
+        console.log('✅ Успешно подключились к MongoDB');
 
-        await launchBot(); // Запускаем Telegram бота
-        // Планировщик задач уже настроен в scheduler.js и запустится автоматически
-        require('./scheduler');
+        console.log('🤖 Запускаем Telegram бота...');
+        await launchBot();
+        console.log('✅ Успешно запустили Telegram бота');
+        
+        console.log('✅ Приложение успешно запущено!');
     } catch (error) {
-        console.error('Failed to start the application:', error);
+        console.error('❌ Ошибка при запуске приложения:', error);
+        process.exit(1);
     }
 }
 
