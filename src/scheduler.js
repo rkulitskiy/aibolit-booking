@@ -5,6 +5,9 @@ const moment = require('moment');
 const eventBus = require('./eventBus');
 const providersManager = require('./providers/manager');
 
+// Хранилище для отслеживания уже найденных МРТ слотов
+let lastMrtSlots = new Set();
+
 async function updateDoctorsTimeSlots() {
     console.log('⏰ Starting to update doctor time slots...');
     
@@ -102,6 +105,91 @@ async function updateLodeDoctorsTimeSlots() {
     }
 }
 
+async function checkMrtSlots() {
+    try {
+        console.log('🔍 Проверка МРТ слотов...');
+        
+        const today = moment();
+        const endDate = moment().add(1, 'month'); // Проверяем на месяц вперед
+        
+        const startParam = today.format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
+        const endParam = endDate.format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
+        
+        const response = await axios.get('https://z-api-lode.vot.by/getAllData', {
+            params: {
+                start: startParam,
+                end: endParam,
+                usluga: 39 // МРТ без контрастного усиления
+            },
+            headers: {
+                'Accept': '*/*',
+                'Accept-Language': 'ru-RU,ru;q=0.9',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Origin': 'https://www.lode.by',
+                'Referer': 'https://www.lode.by/',
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36'
+            }
+        });
+        
+        if (response.data && response.data.tickets) {
+            // Фильтруем все МРТ слоты (любое время и дата)
+            const relevantSlots = response.data.tickets.filter(ticket => {
+                return ticket.uslugs_ids && ticket.uslugs_ids.includes(39);
+            });
+            
+            // Используем все слоты без фильтрации по времени
+            const workingHoursSlots = relevantSlots;
+            
+            console.log(`🔍 Найдено ${workingHoursSlots.length} МРТ слотов (все доступные)`);
+            
+            // Проверяем наличие новых слотов
+            const newSlots = workingHoursSlots.filter(slot => !lastMrtSlots.has(slot.id));
+            
+            if (newSlots.length > 0) {
+                console.log(`🆕 Найдено ${newSlots.length} новых МРТ слотов!`);
+                
+                // Сортируем новые слоты по дате (самые ранние первыми)
+                newSlots.sort((a, b) => new Date(a.start || `${a.date}T${a.time}`) - new Date(b.start || `${b.date}T${b.time}`));
+                
+                // Обновляем список известных слотов
+                newSlots.forEach(slot => lastMrtSlots.add(slot.id));
+                
+                // Уведомляем о новых слотах (показываем только самые ранние если их много)
+                const slotsToNotify = newSlots.length > 5 ? newSlots.slice(0, 5) : newSlots;
+                slotsToNotify.forEach(slot => notifyUsersAboutNewMrtSlot(slot));
+                
+                if (newSlots.length > 5) {
+                    console.log(`📝 Показано уведомлений о первых 5 слотах из ${newSlots.length} новых`);
+                }
+            } else {
+                console.log(`ℹ️ Новых МРТ слотов не найдено. В памяти: ${lastMrtSlots.size} известных слотов`);
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ Ошибка при проверке МРТ слотов:', error.message);
+    }
+}
+
+function notifyUsersAboutNewMrtSlot(slot) {
+    const formattedDate = `${slot.date} ${slot.time}`;
+    
+    let message = `🩻 <b>НОВЫЙ СЛОТ МРТ БЕЗ КОНТРАСТА!</b>\n`;
+    message += `📅 Дата и время: <b>${formattedDate}</b>\n`;
+    message += `🏥 Медцентр: ЛОДЭ\n`;
+    message += `🆔 ID слота: ${slot.id}\n`;
+    message += `\n⚡ Быстрее записывайтесь!`;
+
+    database.getAllUsers().then(users => {
+        users.forEach(user => {
+            eventBus.emit('notifyUser', { userId: user.id, message: message });
+        });
+    }).catch(error => {
+        console.error(`Error notifying users about new MRT slot:`, error);
+    });
+}
+
 function notifyUsersAboutNewSlot(doctor, slot) {
     let formattedDate;
     
@@ -131,12 +219,21 @@ function notifyUsersAboutNewSlot(doctor, slot) {
     });
 }
 
+// Основной cron для обновления слотов докторов (каждые 5 минут)
 cron.schedule('*/5 * * * *', async () => {
     console.log('⏰ Starting scheduled task:', moment().format('YYYY-MM-DD HH:mm:ss'));
     await updateDoctorsTimeSlots();
 });
+
+// Отдельный cron для мониторинга МРТ слотов (каждую минуту)
+cron.schedule('* * * * *', async () => {
+    console.log('🩻 Starting MRT slots check:', moment().format('YYYY-MM-DD HH:mm:ss'));
+    await checkMrtSlots();
+});
+
 console.log('⏰ Планировщик инициализирован с интервалом: */5 * * * *');
+console.log('🩻 МРТ монитор инициализирован с интервалом: * * * * * (каждую минуту)');
 
 eventBus.on('update-schedule', updateDoctorsTimeSlots);
 
-module.exports = { updateDoctorsTimeSlots };
+module.exports = { updateDoctorsTimeSlots, checkMrtSlots };
