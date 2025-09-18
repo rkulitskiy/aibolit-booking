@@ -12,6 +12,19 @@ let isFirstMrtCheck = true; // Флаг первой проверки
 // Настройки МРТ мониторинга через ENV
 const MRT_MONITORING_ENABLED = process.env.MRT_MONITORING_ENABLED !== 'false'; // по умолчанию включено
 const MRT_REQUIRE_CONSECUTIVE_SLOTS = process.env.MRT_REQUIRE_CONSECUTIVE_SLOTS === 'true';
+const MRT_DAYTIME_ONLY = process.env.MRT_DAYTIME_ONLY === 'true'; // фильтр дневного времени (10:00-22:59)
+
+function filterSlotsByDaytime(slots) {
+    if (!MRT_DAYTIME_ONLY) {
+        return slots; // Возвращаем все слоты если фильтр отключен
+    }
+    
+    return slots.filter(slot => {
+        const hour = parseInt(slot.time.split(':')[0]);
+        // Дневное время: с 10:00 до 22:59 включительно
+        return hour >= 10 && hour <= 22;
+    });
+}
 
 function findConsecutiveSlots(slots) {
     const consecutivePairs = [];
@@ -213,10 +226,13 @@ async function checkMrtSlots() {
                 return ticket.uslugs_ids && ticket.uslugs_ids.includes(39);
             });
             
-            // Используем все слоты без фильтрации по времени
-            const workingHoursSlots = relevantSlots;
+            // Применяем фильтр по времени суток если включен
+            const workingHoursSlots = filterSlotsByDaytime(relevantSlots);
             
-            console.log(`🔍 [${moment().format('HH:mm:ss')}] Найдено ${workingHoursSlots.length} МРТ слотов (все доступные)`);
+            const filterInfo = MRT_DAYTIME_ONLY ? 
+                `дневных (10:00-22:59)` : 
+                `всех доступных`;
+            console.log(`🔍 [${moment().format('HH:mm:ss')}] Найдено ${workingHoursSlots.length} МРТ слотов (${filterInfo})`);
             
             // Проверяем наличие новых слотов
             const newSlots = workingHoursSlots.filter(slot => !lastMrtSlots.has(slot.id));
@@ -236,11 +252,14 @@ async function checkMrtSlots() {
                     
                     // Показываем слоты на ближайшие 3 дня для информации
                     const today = moment();
-                    const nearSlots = newSlots.filter(slot => {
+                    let nearSlots = newSlots.filter(slot => {
                         const slotDate = moment(slot.date);
                         const daysDiff = slotDate.diff(today, 'days');
                         return daysDiff >= 0 && daysDiff <= 3;
                     });
+                    
+                    // Применяем временной фильтр к ближайшим слотам тоже
+                    nearSlots = filterSlotsByDaytime(nearSlots);
                     
                     if (nearSlots.length > 0) {
                         if (MRT_REQUIRE_CONSECUTIVE_SLOTS) {
@@ -436,6 +455,7 @@ console.log('⏰ Планировщик инициализирован с инт
 if (MRT_MONITORING_ENABLED) {
     console.log('🩻 МРТ монитор инициализирован с интервалом: * * * * * (каждую минуту)');
     console.log(`🔧 МРТ режим: ${MRT_REQUIRE_CONSECUTIVE_SLOTS ? 'ПАРНЫЕ СЛОТЫ (для сосудистой программы)' : 'ВСЕ СЛОТЫ'}`);
+    console.log(`⏰ Временной фильтр: ${MRT_DAYTIME_ONLY ? 'ТОЛЬКО ДНЕВНОЕ ВРЕМЯ (10:00-22:59)' : 'ЛЮБОЕ ВРЕМЯ'}`);
 } else {
     console.log('🚫 МРТ мониторинг ОТКЛЮЧЕН (MRT_MONITORING_ENABLED=false)');
 }
