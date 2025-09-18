@@ -7,6 +7,16 @@ const providersManager = require('./providers/manager');
 
 // Хранилище для отслеживания уже найденных МРТ слотов
 let lastMrtSlots = new Set();
+let isFirstMrtCheck = true; // Флаг первой проверки
+
+function clearMrtSlotsMemory() {
+    const previousSize = lastMrtSlots.size;
+    lastMrtSlots.clear();
+    isFirstMrtCheck = true; // Сбрасываем флаг первой проверки
+    console.log(`🧹 Память МРТ слотов очищена. Было: ${previousSize} слотов, стало: ${lastMrtSlots.size}`);
+    console.log(`ℹ️ При следующей проверке будут показаны слоты на ближайшие 3 дня`);
+    return `Очищено ${previousSize} слотов из памяти`;
+}
 
 async function updateDoctorsTimeSlots() {
     console.log('⏰ Starting to update doctor time slots...');
@@ -155,12 +165,51 @@ async function checkMrtSlots() {
                 // Обновляем список известных слотов
                 newSlots.forEach(slot => lastMrtSlots.add(slot.id));
                 
-                // Уведомляем о новых слотах (показываем только самые ранние если их много)
-                const slotsToNotify = newSlots.length > 5 ? newSlots.slice(0, 5) : newSlots;
-                slotsToNotify.forEach(slot => notifyUsersAboutNewMrtSlot(slot));
-                
-                if (newSlots.length > 5) {
-                    console.log(`📝 Показано уведомлений о первых 5 слотах из ${newSlots.length} новых`);
+                if (isFirstMrtCheck) {
+                    // При первой проверке только сохраняем слоты, но не уведомляем
+                    console.log(`📝 Первая проверка: сохранено ${newSlots.length} существующих МРТ слотов в память`);
+                    
+                    // Показываем слоты на ближайшие 3 дня для информации
+                    const today = moment();
+                    const nearSlots = newSlots.filter(slot => {
+                        const slotDate = moment(slot.date);
+                        const daysDiff = slotDate.diff(today, 'days');
+                        return daysDiff >= 0 && daysDiff <= 3;
+                    });
+                    
+                    if (nearSlots.length > 0) {
+                        console.log(`📋 Доступные МРТ слоты на ближайшие 3 дня (${nearSlots.length} шт.):`);
+                        nearSlots.slice(0, 10).forEach((slot, index) => {
+                            const daysFromNow = moment(slot.date).diff(today, 'days');
+                            const dayText = daysFromNow === 0 ? 'сегодня' : 
+                                          daysFromNow === 1 ? 'завтра' : 
+                                          daysFromNow === 2 ? 'послезавтра' : 
+                                          `через ${daysFromNow} дня`;
+                            console.log(`  ${index + 1}. ${slot.date} ${slot.time} (${dayText})`);
+                        });
+                        if (nearSlots.length > 10) {
+                            console.log(`  ... и еще ${nearSlots.length - 10} слотов`);
+                        }
+                    } else {
+                        console.log(`ℹ️ Нет доступных МРТ слотов на ближайшие 3 дня`);
+                        
+                        // Показываем самый ранний доступный слот
+                        if (newSlots.length > 0) {
+                            const earliestSlot = newSlots[0]; // уже отсортированы по дате
+                            const daysFromNow = moment(earliestSlot.date).diff(today, 'days');
+                            console.log(`📅 Ближайший доступный слот: ${earliestSlot.date} ${earliestSlot.time} (через ${daysFromNow} дней)`);
+                        }
+                    }
+                    
+                    isFirstMrtCheck = false;
+                } else {
+                    // При последующих проверках уведомляем о новых слотах
+                    const slotsToNotify = newSlots.length > 5 ? newSlots.slice(0, 5) : newSlots;
+                    slotsToNotify.forEach(slot => notifyUsersAboutNewMrtSlot(slot));
+                    
+                    if (newSlots.length > 5) {
+                        console.log(`📝 Показано уведомлений о первых 5 слотах из ${newSlots.length} новых`);
+                    }
                 }
             } else {
                 console.log(`ℹ️ Новых МРТ слотов не найдено. В памяти: ${lastMrtSlots.size} известных слотов`);
@@ -236,4 +285,4 @@ console.log('🩻 МРТ монитор инициализирован с инт
 
 eventBus.on('update-schedule', updateDoctorsTimeSlots);
 
-module.exports = { updateDoctorsTimeSlots, checkMrtSlots };
+module.exports = { updateDoctorsTimeSlots, checkMrtSlots, clearMrtSlotsMemory };
