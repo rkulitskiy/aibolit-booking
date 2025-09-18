@@ -418,7 +418,7 @@ function notifyUsersAboutNewSlot(doctor, slot) {
 }
 
 // Основной cron для обновления слотов докторов (каждые 5 минут)
-cron.schedule('*/5 * * * *', async () => {
+cron.schedule('*/2 * * * *', async () => {
     console.log('⏰ Starting scheduled task:', moment().format('YYYY-MM-DD HH:mm:ss'));
     await updateDoctorsTimeSlots();
 });
