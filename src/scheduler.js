@@ -9,13 +9,67 @@ const providersManager = require('./providers/manager');
 let lastMrtSlots = new Set();
 let isFirstMrtCheck = true; // Флаг первой проверки
 
+// Настройки МРТ мониторинга через ENV
+const MRT_MONITORING_ENABLED = process.env.MRT_MONITORING_ENABLED !== 'false'; // по умолчанию включено
+const MRT_REQUIRE_CONSECUTIVE_SLOTS = process.env.MRT_REQUIRE_CONSECUTIVE_SLOTS === 'true';
+
+function findConsecutiveSlots(slots) {
+    const consecutivePairs = [];
+    
+    // Группируем слоты по дате
+    const slotsByDate = {};
+    slots.forEach(slot => {
+        if (!slotsByDate[slot.date]) {
+            slotsByDate[slot.date] = [];
+        }
+        slotsByDate[slot.date].push(slot);
+    });
+    
+    // Ищем парные слоты для каждой даты
+    Object.keys(slotsByDate).forEach(date => {
+        const daySlots = slotsByDate[date];
+        
+        // Сортируем слоты по времени
+        daySlots.sort((a, b) => a.time.localeCompare(b.time));
+        
+        // Ищем пары с интервалом 30 минут
+        for (let i = 0; i < daySlots.length - 1; i++) {
+            const currentSlot = daySlots[i];
+            const nextSlot = daySlots[i + 1];
+            
+            const currentTime = moment(`${date}T${currentSlot.time}`);
+            const nextTime = moment(`${date}T${nextSlot.time}`);
+            
+            // Проверяем что следующий слот через 30 минут
+            const diffMinutes = nextTime.diff(currentTime, 'minutes');
+            if (diffMinutes === 30) {
+                consecutivePairs.push({
+                    slot1: currentSlot,
+                    slot2: nextSlot,
+                    date: date,
+                    startTime: currentSlot.time,
+                    endTime: nextSlot.time
+                });
+            }
+        }
+    });
+    
+    return consecutivePairs;
+}
+
 function clearMrtSlotsMemory() {
     const previousSize = lastMrtSlots.size;
+    const previousPairsSize = global.lastMrtPairs ? global.lastMrtPairs.size : 0;
+    
     lastMrtSlots.clear();
+    if (global.lastMrtPairs) {
+        global.lastMrtPairs.clear();
+    }
     isFirstMrtCheck = true; // Сбрасываем флаг первой проверки
-    console.log(`🧹 Память МРТ слотов очищена. Было: ${previousSize} слотов, стало: ${lastMrtSlots.size}`);
+    
+    console.log(`🧹 Память МРТ слотов очищена. Было: ${previousSize} слотов, ${previousPairsSize} пар`);
     console.log(`ℹ️ При следующей проверке будут показаны слоты на ближайшие 3 дня`);
-    return `Очищено ${previousSize} слотов из памяти`;
+    return `Очищено ${previousSize} слотов и ${previousPairsSize} пар из памяти`;
 }
 
 async function updateDoctorsTimeSlots() {
@@ -178,17 +232,49 @@ async function checkMrtSlots() {
                     });
                     
                     if (nearSlots.length > 0) {
-                        console.log(`📋 Доступные МРТ слоты на ближайшие 3 дня (${nearSlots.length} шт.):`);
-                        nearSlots.slice(0, 10).forEach((slot, index) => {
-                            const daysFromNow = moment(slot.date).diff(today, 'days');
-                            const dayText = daysFromNow === 0 ? 'сегодня' : 
-                                          daysFromNow === 1 ? 'завтра' : 
-                                          daysFromNow === 2 ? 'послезавтра' : 
-                                          `через ${daysFromNow} дня`;
-                            console.log(`  ${index + 1}. ${slot.date} ${slot.time} (${dayText})`);
-                        });
-                        if (nearSlots.length > 10) {
-                            console.log(`  ... и еще ${nearSlots.length - 10} слотов`);
+                        if (MRT_REQUIRE_CONSECUTIVE_SLOTS) {
+                            // Ищем парные слоты в ближайших
+                            const nearConsecutivePairs = findConsecutiveSlots(nearSlots);
+                            
+                            console.log(`📋 Доступные МРТ слоты на ближайшие 3 дня (${nearSlots.length} шт.):`);
+                            nearSlots.slice(0, 10).forEach((slot, index) => {
+                                const daysFromNow = moment(slot.date).diff(today, 'days');
+                                const dayText = daysFromNow === 0 ? 'сегодня' : 
+                                              daysFromNow === 1 ? 'завтра' : 
+                                              daysFromNow === 2 ? 'послезавтра' : 
+                                              `через ${daysFromNow} дня`;
+                                console.log(`  ${index + 1}. ${slot.date} ${slot.time} (${dayText})`);
+                            });
+                            if (nearSlots.length > 10) {
+                                console.log(`  ... и еще ${nearSlots.length - 10} слотов`);
+                            }
+                            
+                            if (nearConsecutivePairs.length > 0) {
+                                console.log(`\n🔥 Найдено ${nearConsecutivePairs.length} парных слотов для сосудистой программы:`);
+                                nearConsecutivePairs.slice(0, 5).forEach((pair, index) => {
+                                    const daysFromNow = moment(pair.date).diff(today, 'days');
+                                    const dayText = daysFromNow === 0 ? 'сегодня' : 
+                                                  daysFromNow === 1 ? 'завтра' : 
+                                                  daysFromNow === 2 ? 'послезавтра' : 
+                                                  `через ${daysFromNow} дня`;
+                                    console.log(`  ${index + 1}. ${pair.date} ${pair.startTime}-${pair.endTime} (${dayText}) - 1 ЧАС`);
+                                });
+                            } else {
+                                console.log(`\n⚠️ Парных слотов на ближайшие 3 дня не найдено`);
+                            }
+                        } else {
+                            console.log(`📋 Доступные МРТ слоты на ближайшие 3 дня (${nearSlots.length} шт.):`);
+                            nearSlots.slice(0, 10).forEach((slot, index) => {
+                                const daysFromNow = moment(slot.date).diff(today, 'days');
+                                const dayText = daysFromNow === 0 ? 'сегодня' : 
+                                              daysFromNow === 1 ? 'завтра' : 
+                                              daysFromNow === 2 ? 'послезавтра' : 
+                                              `через ${daysFromNow} дня`;
+                                console.log(`  ${index + 1}. ${slot.date} ${slot.time} (${dayText})`);
+                            });
+                            if (nearSlots.length > 10) {
+                                console.log(`  ... и еще ${nearSlots.length - 10} слотов`);
+                            }
                         }
                     } else {
                         console.log(`ℹ️ Нет доступных МРТ слотов на ближайшие 3 дня`);
@@ -204,11 +290,43 @@ async function checkMrtSlots() {
                     isFirstMrtCheck = false;
                 } else {
                     // При последующих проверках уведомляем о новых слотах
-                    const slotsToNotify = newSlots.length > 5 ? newSlots.slice(0, 5) : newSlots;
-                    slotsToNotify.forEach(slot => notifyUsersAboutNewMrtSlot(slot));
-                    
-                    if (newSlots.length > 5) {
-                        console.log(`📝 Показано уведомлений о первых 5 слотах из ${newSlots.length} новых`);
+                    if (MRT_REQUIRE_CONSECUTIVE_SLOTS) {
+                        // Режим парных слотов - ищем пары среди ВСЕХ слотов, но уведомляем только о новых парах
+                        const allConsecutivePairs = findConsecutiveSlots(workingHoursSlots);
+                        
+                        // Создаем уникальный ключ для каждой пары
+                        const pairKey = (pair) => `${pair.date}_${pair.startTime}_${pair.endTime}`;
+                        
+                        // Фильтруем только новые пары (которых не было в предыдущей проверке)
+                        if (!global.lastMrtPairs) {
+                            global.lastMrtPairs = new Set();
+                        }
+                        
+                        const newPairs = allConsecutivePairs.filter(pair => !global.lastMrtPairs.has(pairKey(pair)));
+                        
+                        if (newPairs.length > 0) {
+                            console.log(`🔥 Найдено ${newPairs.length} новых парных МРТ слотов (для сосудистой программы)!`);
+                            
+                            // Обновляем список известных пар
+                            newPairs.forEach(pair => global.lastMrtPairs.add(pairKey(pair)));
+                            
+                            const pairsToNotify = newPairs.length > 3 ? newPairs.slice(0, 3) : newPairs;
+                            pairsToNotify.forEach(pair => notifyUsersAboutNewMrtConsecutiveSlots(pair));
+                            
+                            if (newPairs.length > 3) {
+                                console.log(`📝 Показано уведомлений о первых 3 парах из ${newPairs.length} найденных`);
+                            }
+                        } else if (newSlots.length > 0) {
+                            console.log(`ℹ️ Новые МРТ слоты найдены (${newSlots.length}), но новых парных слотов нет`);
+                        }
+                    } else {
+                        // Обычный режим - уведомляем о всех новых слотах
+                        const slotsToNotify = newSlots.length > 5 ? newSlots.slice(0, 5) : newSlots;
+                        slotsToNotify.forEach(slot => notifyUsersAboutNewMrtSlot(slot));
+                        
+                        if (newSlots.length > 5) {
+                            console.log(`📝 Показано уведомлений о первых 5 слотах из ${newSlots.length} новых`);
+                        }
                     }
                 }
             } else {
@@ -227,8 +345,6 @@ function notifyUsersAboutNewMrtSlot(slot) {
     let message = `🩻 <b>НОВЫЙ СЛОТ МРТ БЕЗ КОНТРАСТА!</b>\n`;
     message += `📅 Дата и время: <b>${formattedDate}</b>\n`;
     message += `🏥 Медцентр: ЛОДЭ\n`;
-    message += `🆔 ID слота: ${slot.id}\n`;
-    message += `\n⚡ Быстрее записывайтесь!`;
 
     database.getAllUsers().then(users => {
         users.forEach(user => {
@@ -236,6 +352,23 @@ function notifyUsersAboutNewMrtSlot(slot) {
         });
     }).catch(error => {
         console.error(`Error notifying users about new MRT slot:`, error);
+    });
+}
+
+function notifyUsersAboutNewMrtConsecutiveSlots(consecutivePair) {
+    const timeRange = `${consecutivePair.startTime} - ${consecutivePair.endTime}`;
+    
+    let message = `🩻 <b>НОВЫЕ ПАРНЫЕ СЛОТЫ МРТ (1 ЧАС)!</b>\n`;
+    message += `📅 Дата: <b>${consecutivePair.date}</b>\n`;
+    message += `⏰ Время: <b>${timeRange}</b>\n`;
+    message += `🏥 Медцентр: ЛОДЭ\n`;
+
+    database.getAllUsers().then(users => {
+        users.forEach(user => {
+            eventBus.emit('notifyUser', { userId: user.id, message: message });
+        });
+    }).catch(error => {
+        console.error(`Error notifying users about new consecutive MRT slots:`, error);
     });
 }
 
@@ -275,13 +408,21 @@ cron.schedule('*/2 * * * *', async () => {
 });
 
 // Отдельный cron для мониторинга МРТ слотов (каждую минуту)
-cron.schedule('* * * * *', async () => {
-    console.log('🩻 Starting MRT slots check:', moment().format('YYYY-MM-DD HH:mm:ss'));
-    await checkMrtSlots();
-});
+if (MRT_MONITORING_ENABLED) {
+    cron.schedule('* * * * *', async () => {
+        console.log('🩻 Starting MRT slots check:', moment().format('YYYY-MM-DD HH:mm:ss'));
+        await checkMrtSlots();
+    });
+}
 
 console.log('⏰ Планировщик инициализирован с интервалом: */5 * * * *');
-console.log('🩻 МРТ монитор инициализирован с интервалом: * * * * * (каждую минуту)');
+
+if (MRT_MONITORING_ENABLED) {
+    console.log('🩻 МРТ монитор инициализирован с интервалом: * * * * * (каждую минуту)');
+    console.log(`🔧 МРТ режим: ${MRT_REQUIRE_CONSECUTIVE_SLOTS ? 'ПАРНЫЕ СЛОТЫ (для сосудистой программы)' : 'ВСЕ СЛОТЫ'}`);
+} else {
+    console.log('🚫 МРТ мониторинг ОТКЛЮЧЕН (MRT_MONITORING_ENABLED=false)');
+}
 
 eventBus.on('update-schedule', updateDoctorsTimeSlots);
 
