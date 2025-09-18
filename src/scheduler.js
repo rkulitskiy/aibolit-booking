@@ -73,13 +73,16 @@ function clearMrtSlotsMemory() {
 }
 
 async function updateDoctorsTimeSlots() {
+    const startTime = Date.now();
     console.log('⏰ Starting to update doctor time slots...');
     
     await updateAibolitDoctorsTimeSlots();
     
     await updateLodeDoctorsTimeSlots();
     
-    console.log('✅ Finished updating doctor time slots');
+    const endTime = Date.now();
+    const duration = endTime - startTime;
+    console.log(`✅ Finished updating doctor time slots (${duration}ms)`);
 }
 
 async function updateAibolitDoctorsTimeSlots() {
@@ -170,14 +173,18 @@ async function updateLodeDoctorsTimeSlots() {
 }
 
 async function checkMrtSlots() {
+    const startTime = Date.now();
     try {
-        console.log('🔍 Проверка МРТ слотов...');
+        console.log(`🔍 [${moment().format('HH:mm:ss')}] Проверка МРТ слотов...`);
         
         const today = moment();
         const endDate = moment().add(1, 'month'); // Проверяем на месяц вперед
         
         const startParam = today.format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
         const endParam = endDate.format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
+        
+        console.log(`📡 [${moment().format('HH:mm:ss')}] Запрос к API Lode: ${startParam} → ${endParam}`);
+        const apiStartTime = Date.now();
         
         const response = await axios.get('https://z-api-lode.vot.by/getAllData', {
             params: {
@@ -196,6 +203,10 @@ async function checkMrtSlots() {
             }
         });
         
+        const apiEndTime = Date.now();
+        const apiDuration = apiEndTime - apiStartTime;
+        console.log(`📡 [${moment().format('HH:mm:ss')}] API ответ получен за ${apiDuration}ms`);
+        
         if (response.data && response.data.tickets) {
             // Фильтруем все МРТ слоты (любое время и дата)
             const relevantSlots = response.data.tickets.filter(ticket => {
@@ -205,13 +216,13 @@ async function checkMrtSlots() {
             // Используем все слоты без фильтрации по времени
             const workingHoursSlots = relevantSlots;
             
-            console.log(`🔍 Найдено ${workingHoursSlots.length} МРТ слотов (все доступные)`);
+            console.log(`🔍 [${moment().format('HH:mm:ss')}] Найдено ${workingHoursSlots.length} МРТ слотов (все доступные)`);
             
             // Проверяем наличие новых слотов
             const newSlots = workingHoursSlots.filter(slot => !lastMrtSlots.has(slot.id));
             
             if (newSlots.length > 0) {
-                console.log(`🆕 Найдено ${newSlots.length} новых МРТ слотов!`);
+                console.log(`🆕 [${moment().format('HH:mm:ss')}] Найдено ${newSlots.length} новых МРТ слотов!`);
                 
                 // Сортируем новые слоты по дате (самые ранние первыми)
                 newSlots.sort((a, b) => new Date(a.start || `${a.date}T${a.time}`) - new Date(b.start || `${b.date}T${b.time}`));
@@ -221,7 +232,7 @@ async function checkMrtSlots() {
                 
                 if (isFirstMrtCheck) {
                     // При первой проверке только сохраняем слоты, но не уведомляем
-                    console.log(`📝 Первая проверка: сохранено ${newSlots.length} существующих МРТ слотов в память`);
+                    console.log(`📝 [${moment().format('HH:mm:ss')}] Первая проверка: сохранено ${newSlots.length} существующих МРТ слотов в память`);
                     
                     // Показываем слоты на ближайшие 3 дня для информации
                     const today = moment();
@@ -305,7 +316,7 @@ async function checkMrtSlots() {
                         const newPairs = allConsecutivePairs.filter(pair => !global.lastMrtPairs.has(pairKey(pair)));
                         
                         if (newPairs.length > 0) {
-                            console.log(`🔥 Найдено ${newPairs.length} новых парных МРТ слотов (для сосудистой программы)!`);
+                            console.log(`🔥 [${moment().format('HH:mm:ss')}] Найдено ${newPairs.length} новых парных МРТ слотов (для сосудистой программы)!`);
                             
                             // Обновляем список известных пар
                             newPairs.forEach(pair => global.lastMrtPairs.add(pairKey(pair)));
@@ -330,12 +341,16 @@ async function checkMrtSlots() {
                     }
                 }
             } else {
-                console.log(`ℹ️ Новых МРТ слотов не найдено. В памяти: ${lastMrtSlots.size} известных слотов`);
+                console.log(`ℹ️ [${moment().format('HH:mm:ss')}] Новых МРТ слотов не найдено. В памяти: ${lastMrtSlots.size} известных слотов`);
             }
         }
         
     } catch (error) {
         console.error('❌ Ошибка при проверке МРТ слотов:', error.message);
+    } finally {
+        const endTime = Date.now();
+        const duration = endTime - startTime;
+        console.log(`✅ [${moment().format('HH:mm:ss')}] МРТ проверка завершена за ${duration}ms`);
     }
 }
 
@@ -356,11 +371,12 @@ function notifyUsersAboutNewMrtSlot(slot) {
 }
 
 function notifyUsersAboutNewMrtConsecutiveSlots(consecutivePair) {
-    const timeRange = `${consecutivePair.startTime} - ${consecutivePair.endTime}`;
+    const startTimeFormatted = consecutivePair.startTime.replace(':', '.');
+    const endTimeFormatted = consecutivePair.endTime.replace(':', '.');
     
-    let message = `🩻 <b>НОВЫЕ ПАРНЫЕ СЛОТЫ МРТ (1 ЧАС)!</b>\n`;
+    let message = `🩻 <b>НОВЫЕ ПАРНЫЕ СЛОТЫ МРТ!</b>\n`;
     message += `📅 Дата: <b>${consecutivePair.date}</b>\n`;
-    message += `⏰ Время: <b>${timeRange}</b>\n`;
+    message += `🕐 Время: <b>${startTimeFormatted} и ${endTimeFormatted}</b>\n`;
     message += `🏥 Медцентр: ЛОДЭ\n`;
 
     database.getAllUsers().then(users => {
@@ -402,7 +418,7 @@ function notifyUsersAboutNewSlot(doctor, slot) {
 }
 
 // Основной cron для обновления слотов докторов (каждые 5 минут)
-cron.schedule('*/2 * * * *', async () => {
+cron.schedule('*/5 * * * *', async () => {
     console.log('⏰ Starting scheduled task:', moment().format('YYYY-MM-DD HH:mm:ss'));
     await updateDoctorsTimeSlots();
 });
