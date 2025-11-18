@@ -371,9 +371,21 @@ async function setupBotCommands() {
 }
 
 async function launchBot() {
-    await bot.launch();
-    console.log('🤖 Telegram bot launched');
-    await setupBotCommands();
+    try {
+        await bot.launch();
+        console.log('🤖 Telegram bot launched');
+        await setupBotCommands();
+    } catch (error) {
+        console.error('❌ Ошибка при запуске Telegram бота:', error);
+        
+        // Если ошибка связана с DNS/сетью, пробрасываем её дальше
+        if (error.code === 'EAI_AGAIN' || error.errno === 'EAI_AGAIN') {
+            throw error;
+        }
+        
+        // Для других ошибок тоже пробрасываем
+        throw error;
+    }
 }
 
 eventBus.on('notifyUser', (data) => {

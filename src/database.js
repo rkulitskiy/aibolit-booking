@@ -5,16 +5,46 @@ const moment = require('moment');
 
 class Database {
     constructor() {
-        this.client = new MongoClient(process.env.MONGODB_URI);
+        this.client = new MongoClient(process.env.MONGODB_URI, {
+            serverSelectionTimeoutMS: 5000, // Таймаут подключения 5 сек
+            socketTimeoutMS: 45000, // Таймаут сокета 45 сек
+            maxPoolSize: 10, // Максимальный размер пула соединений
+            retryWrites: true,
+            retryReads: true
+        });
         this.db = null;
+        this.isConnecting = false;
     }
 
     async connect() {
+        if (this.isConnecting) {
+            console.log('🔄 Подключение к MongoDB уже в процессе...');
+            return;
+        }
+        
+        this.isConnecting = true;
         try {
             await this.client.connect();
             this.db = this.client.db("aibolit-booking");
+            console.log('✅ Успешно подключились к MongoDB');
+            this.isConnecting = false;
         } catch (error) {
             console.error("Failed to connect to MongoDB", error);
+            this.db = null;
+            this.isConnecting = false;
+            throw error; // Пробрасываем ошибку дальше
+        }
+    }
+
+    async ensureConnection() {
+        if (!this.db && !this.isConnecting) {
+            console.log('🔄 Попытка переподключения к MongoDB...');
+            try {
+                await this.connect();
+            } catch (error) {
+                console.error('❌ Не удалось переподключиться к MongoDB:', error.message);
+                throw error;
+            }
         }
     }
 
@@ -78,6 +108,10 @@ class Database {
 
     async getEnabledDoctorsByProvider(provider) {
         try {
+            await this.ensureConnection();
+            if (!this.db) {
+                throw new Error('База данных не подключена');
+            }
             const doctorsCollection = this.db.collection('doctors');
             return await doctorsCollection.find({ isEnabled: true, provider: provider }).toArray();
         } catch (error) {
